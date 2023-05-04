@@ -6,6 +6,7 @@ import numpy as np
 from fastapi import FastAPI, WebSocket
 
 from track_4 import track_data, country_balls_amount
+from metrics import main_metric
 
 app = FastAPI(title='Tracker assignment')
 imgs = glob.glob('imgs/*')
@@ -104,6 +105,7 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_text(str(country_balls))
     tracking = {i: deque([], TRACK_DEPTH) for i in range(country_balls_amount)}
     coords = {i: deque([], 3) for i in range(country_balls_amount)}
+    tracking_ids = {}
 
     for el in track_data:
         await asyncio.sleep(0.5)
@@ -113,4 +115,11 @@ async def websocket_endpoint(websocket: WebSocket):
         # el = tracker_strong(el)
         # отправка информации по фрейму
         await websocket.send_json(el)
+        # добавление индексов из трекера в словарь
+        for ball_data in el['data']:
+            if ball_data['cb_id'] in tracking_ids:
+                tracking_ids[ball_data['cb_id']].append(ball_data['track_id'])
+            else:
+                tracking_ids[ball_data['cb_id']] = [ball_data['track_id']]
+    print(main_metric(tracking_ids))
     print('Bye..')
