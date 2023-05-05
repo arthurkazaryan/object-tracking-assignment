@@ -2,18 +2,18 @@ import glob
 from collections import deque
 
 import asyncio
+from deepsort.detection import Detection
+from deepsort.tracker import DeepSortTracker
 import numpy as np
 from fastapi import FastAPI, WebSocket
 
-from track_8 import track_data, country_balls_amount
+from track_3 import track_data, country_balls_amount
 from metrics import main_metric
 
 app = FastAPI(title='Tracker assignment')
 imgs = glob.glob('imgs/*')
 country_balls = [{'cb_id': x, 'img': imgs[x % len(imgs)]} for x in range(country_balls_amount)]
 print('Started')
-
-TRACK_DEPTH = 3
 
 
 def calculate_distance(current_ball_data: np.ndarray, mean_track_data: np.ndarray):
@@ -55,7 +55,6 @@ def tracker_soft(el, tracking):
         tracking[ball_data['cb_id']].append([ball_data['x'], ball_data['y']])
 
     return el, tracking
-    
 
 
 def tracker_strong(el, tracking, coords):
@@ -108,9 +107,42 @@ def tracker_strong(el, tracking, coords):
                 min_idx = np.argmax(counts)
             else:
                 min_idx = m_idx
-            ball_data["track_id"] = min_idx
+            ball_data["track_id"] = int(min_idx)
         tracking[ball_data['cb_id']].append(ball_data["track_id"])
         coords[ball_data['cb_id']].append([ball_data['x'], ball_data['y']])
+
+    return el, tracking
+
+
+def tracker_indus(el, tracking):
+    # Фиг запустишь. Вставил по приколу
+    # Перед запуском нужно отшлифовать библиотеку deepsort
+
+    frame_detections = []
+    for ball_data in el['data']:
+        if ball_data['bounding_box']:
+            x1, y1, x2, y2 = ball_data['bounding_box']
+            frame_detections.append(
+                Detection(
+                    tlwh=[x1, y1, x2-x1, y2-y1],
+                    confidence=1,
+                    feature=ball_data['cb_id']
+                )
+            )
+        if el['frame_id'] == 1:
+            ball_data['track_id'] = ball_data['cb_id']
+
+        try:
+            tracking.update(frame_detections)
+            tracking.predict()
+        except:  # AxisError
+            pass
+
+    for ball_data in el['data']:
+        track_id = None
+        if ball_data['cb_id'] <= len(tracking.tracks):
+            track_id = tracking.tracks[ball_data['cb_id']].track_id
+        ball_data['track_id'] = track_id
 
     return el, tracking
 
@@ -122,18 +154,21 @@ async def websocket_endpoint(websocket: WebSocket):
     # отправка служебной информации для инициализации объектов
     # класса CountryBall на фронте
     await websocket.send_text(str(country_balls))
-    tracking = {i: deque([], TRACK_DEPTH) for i in range(country_balls_amount)}
-    coords = {i: deque([], 3) for i in range(country_balls_amount)}
+    tracking = {i: deque([], 3) for i in range(country_balls_amount)}
+    tracking_strong = {i: deque([], 10) for i in range(country_balls_amount)}
+    tracking_deepsort = DeepSortTracker()
+    coords_strong = {i: deque([], 3) for i in range(country_balls_amount)}
     tracking_ids = {}
 
     for el in track_data:
         await asyncio.sleep(0.5)
         # TODO: part 1
-        el, tracking = tracker_soft(el, tracking)
+        # el, tracking = tracker_soft(el, tracking)
         # TODO: part 2
-        # el = tracker_strong(el, tracking, coords)
+        el, tracking_strong = tracker_strong(el, tracking_strong, coords_strong)
+        # el, tracking_deepsort = tracker_indus(el, tracking_deepsort)
         # отправка информации по фрейму
-        # await websocket.send_json(el)
+        await websocket.send_json(el)
         # добавление индексов из трекера в словарь
         for ball_data in el['data']:
             if ball_data['cb_id'] in tracking_ids:

@@ -3,3 +3,4 @@ matplotlib==3.5.1
 numpy>=1.13.3
 scipy==1.8.0
 uvicorn[standard]
+deepsort
